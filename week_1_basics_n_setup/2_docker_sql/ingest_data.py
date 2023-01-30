@@ -18,19 +18,22 @@ def main(params):
     db = params.db
     table_name = params.table_name
     url = params.url
+    local_path = params.local_path
     
     # the backup files are gzipped, and it's important to keep the correct extension
     # for pandas to be able to open the file
-    if url.endswith('.csv.gz'):
-        csv_name = 'output.csv.gz'
-    else:
-        csv_name = 'output.csv'
+    if not local_path: 
+        if url.endswith('.csv.gz'):
+            csv_name = 'output.csv.gz'
+        else:
+            csv_name = 'output.csv'
 
-    os.system(f"wget {url} -O {csv_name}")
+        os.system(f"wget {url} -O {csv_name}")
+    else:
+        csv_name = local_path
+    df_iter = pd.read_csv(csv_name, iterator=True, chunksize=100000)
 
     engine = create_engine(f'postgresql://{user}:{password}@{host}:{port}/{db}')
-
-    df_iter = pd.read_csv(csv_name, iterator=True, chunksize=100000)
 
     df = next(df_iter)
 
@@ -41,26 +44,17 @@ def main(params):
 
     df.to_sql(name=table_name, con=engine, if_exists='append')
 
+    for df_iter in df: 
+        t_start = time()
+        
+        df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
+        df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
 
-    while True: 
+        df.to_sql(name=table_name, con=engine, if_exists='append')
 
-        try:
-            t_start = time()
-            
-            df = next(df_iter)
+        t_end = time()
 
-            df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-            df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-
-            df.to_sql(name=table_name, con=engine, if_exists='append')
-
-            t_end = time()
-
-            print('inserted another chunk, took %.3f second' % (t_end - t_start))
-
-        except StopIteration:
-            print("Finished ingesting data into the postgres database")
-            break
+        print('inserted another chunk, took %.3f second' % (t_end - t_start))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Ingest CSV data to Postgres')
@@ -71,7 +65,8 @@ if __name__ == '__main__':
     parser.add_argument('--port', required=True, help='port for postgres')
     parser.add_argument('--db', required=True, help='database name for postgres')
     parser.add_argument('--table_name', required=True, help='name of the table where we will write the results to')
-    parser.add_argument('--url', required=True, help='url of the csv file')
+    parser.add_argument('--url', required=False, help='url of the csv file', default="")
+    parser.add_argument('--local_path', required=True, help='local_path of the csv file', default="")
 
     args = parser.parse_args()
 
